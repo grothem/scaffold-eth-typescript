@@ -9,7 +9,7 @@ import { useEthersContext } from 'eth-hooks/context';
 import { useDexEthPrice } from 'eth-hooks/dapps';
 import { asEthersAdaptor } from 'eth-hooks/functions';
 
-import { MainPageMenu, MainPageContracts, MainPageFooter, MainPageHeader } from './components/main';
+import { MainPageMenu, MainPageFooter, MainPageHeader } from './components/main';
 import { useScaffoldHooksExamples as useScaffoldHooksExamples } from './components/main/hooks/useScaffoldHooksExamples';
 
 import { useBurnerFallback } from '~~/components/main/hooks/useBurnerFallback';
@@ -18,6 +18,17 @@ import { Hints, ExampleUI } from '~~/components/pages';
 import { BURNER_FALLBACK_ENABLED, MAINNET_PROVIDER } from '~~/config/appConfig';
 import { useAppContracts, useConnectAppContracts, useLoadAppContracts } from '~~/config/contractContext';
 import { NETWORKS } from '~~/models/constants/networks';
+
+import { createAlchemyWeb3 } from '@alch/alchemy-web3';
+import { AddressInput } from 'eth-components/ant';
+
+const web3 = createAlchemyWeb3('YOUR_ALCHEMY_APP_URL');
+const ensContractAddress = '0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85'; // mainnet
+interface Metadata {
+  title: string;
+  description: string;
+  image: string;
+}
 
 /**
  * ⛳️⛳️⛳️⛳️⛳️⛳️⛳️⛳️⛳️⛳️⛳️⛳️⛳️⛳️
@@ -46,6 +57,64 @@ export const Main: FC = () => {
 
   // if no user is found use a burner wallet on localhost as fallback if enabled
   useBurnerFallback(scaffoldAppProviders, BURNER_FALLBACK_ENABLED);
+
+  const [address, setAddress] = useState('');
+  const [nfts, setNfts] = useState<Metadata[]>([]);
+  useEffect(() => {
+    if (!address) {
+      setNfts([]);
+      return;
+    }
+
+    const getNfts = async (): Promise<void> => {
+      const nfts = await web3.alchemy.getNfts({
+        owner: address,
+      });
+
+      const nftMetadata: Metadata[] = [];
+      for (let i = 0; i < nfts.ownedNfts.length; i++) {
+        const nft = nfts.ownedNfts[i];
+        const metadata = await web3.alchemy.getNftMetadata({
+          contractAddress: nft.contract.address,
+          tokenId: nft.id.tokenId,
+        });
+
+        if (!metadata.metadata) {
+          continue;
+        }
+
+        let image = metadata.metadata?.image ?? '';
+        let title = metadata.title;
+        if (!metadata.metadata.image && metadata.tokenUri) {
+          const decoder = new TextDecoder();
+          const content = metadata.tokenUri.raw.replace('data:application/json;base64,', '');
+          try {
+            const buffer = Buffer.from(content, 'base64');
+            const json = JSON.parse(decoder.decode(buffer));
+            console.log(json);
+            image = json.image;
+            title = json.name;
+          } catch (error) {
+            console.log(error);
+          }
+        } else if (nft.contract.address === ensContractAddress) {
+          image = `https://metadata.ens.domains/mainnet/${ensContractAddress}/${nft.id.tokenId}/image`;
+        }
+
+        console.log(metadata);
+        nftMetadata.push({
+          title,
+          description: metadata.description,
+          image,
+        });
+      }
+      setNfts(nftMetadata);
+    };
+    getNfts().then(
+      () => {},
+      () => {}
+    );
+  }, [address]);
 
   // -----------------------------
   // Load Contracts
@@ -108,7 +177,25 @@ export const Main: FC = () => {
         <MainPageMenu route={route} setRoute={setRoute} />
         <Switch>
           <Route exact path="/">
-            <MainPageContracts scaffoldAppProviders={scaffoldAppProviders} />
+            <div className="max-w-md mx-auto mt-10">
+              <AddressInput
+                hideScanner={true}
+                ensProvider={scaffoldAppProviders.mainnetAdaptor?.provider}
+                placeholder="Search Address"
+                address={address}
+                onChange={setAddress}
+              />
+            </div>
+            <div className="flex flex-wrap">
+              {nfts.map((nft, i) => (
+                <div key={i}>
+                  <img style={{ width: '250px', height: '250px' }} className="w-full" src={nft.image} />
+                  <div>{nft.title}</div>
+                  <div>{nft.description}</div>
+                </div>
+              ))}
+            </div>
+            {/* <MainPageContracts scaffoldAppProviders={scaffoldAppProviders} /> */}
           </Route>
           {/* you can add routes here like the below examlples */}
           <Route path="/hints">
