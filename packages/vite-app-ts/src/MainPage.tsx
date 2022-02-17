@@ -1,10 +1,8 @@
 import React, { FC, useEffect, useState } from 'react';
 import { BrowserRouter, Route, Switch } from 'react-router-dom';
-
 import '~~/styles/main-page.css';
-
 import { GenericContract } from 'eth-components/ant/generic-contract';
-import { useContractReader, useBalance, useEthersAdaptorFromProviderOrSigners, useEventListener } from 'eth-hooks';
+import { useBalance, useEthersAdaptorFromProviderOrSigners } from 'eth-hooks';
 import { useEthersContext } from 'eth-hooks/context';
 import { useDexEthPrice } from 'eth-hooks/dapps';
 import { asEthersAdaptor } from 'eth-hooks/functions';
@@ -65,15 +63,22 @@ export const Main: FC = () => {
       setNfts([]);
       return;
     }
-
+    let isCanceled = false;
+    const abortController = new AbortController();
     const getNfts = async (): Promise<void> => {
-      const nfts = await web3.alchemy.getNfts({
+      setNfts([]);
+      const adressNfts = await web3.alchemy.getNfts({
         owner: address,
       });
 
-      const nftMetadata: Metadata[] = [];
-      for (let i = 0; i < nfts.ownedNfts.length; i++) {
-        const nft = nfts.ownedNfts[i];
+      console.log(adressNfts);
+
+      for (let i = 0; i < adressNfts.ownedNfts.length; i++) {
+        if (isCanceled) {
+          return;
+        }
+
+        const nft = adressNfts.ownedNfts[i];
         const metadata = await web3.alchemy.getNftMetadata({
           contractAddress: nft.contract.address,
           tokenId: nft.id.tokenId,
@@ -83,37 +88,41 @@ export const Main: FC = () => {
           continue;
         }
 
+        // console.log(metadata);
         let image = metadata.metadata?.image ?? '';
         let title = metadata.title;
-        if (!metadata.metadata.image && metadata.tokenUri) {
-          const decoder = new TextDecoder();
-          const content = metadata.tokenUri.raw.replace('data:application/json;base64,', '');
+        let description = metadata.description;
+
+        if (nft.contract.address === ensContractAddress) {
+          // need to use the ens metadata service
           try {
-            const buffer = Buffer.from(content, 'base64');
-            const json = JSON.parse(decoder.decode(buffer));
-            console.log(json);
-            image = json.image;
-            title = json.name;
-          } catch (error) {
-            console.log(error);
+            const response = await fetch(
+              `https://metadata.ens.domains/mainnet/${ensContractAddress}/${nft.id.tokenId}`,
+              {
+                signal: abortController.signal,
+              }
+            );
+            const data = (await response.json()) as { image_url: string; name: string; description: string };
+            image = data.image_url;
+            title = data.name;
+            description = data.description;
+          } catch (e) {
+            console.error(e);
           }
-        } else if (nft.contract.address === ensContractAddress) {
-          image = `https://metadata.ens.domains/mainnet/${ensContractAddress}/${nft.id.tokenId}/image`;
         }
 
-        console.log(metadata);
-        nftMetadata.push({
-          title,
-          description: metadata.description,
-          image,
-        });
+        setNfts((prev) => [...prev, { title, description, image }]);
       }
-      setNfts(nftMetadata);
     };
     getNfts().then(
       () => {},
       () => {}
     );
+
+    return () => {
+      isCanceled = true;
+      abortController.abort();
+    };
   }, [address]);
 
   // -----------------------------
@@ -144,15 +153,15 @@ export const Main: FC = () => {
   const mainnetDai = useAppContracts('DAI', NETWORKS.mainnet.chainId);
 
   // keep track of a variable from the contract in the local React state:
-  const [purpose, update] = useContractReader(
-    yourContract,
-    yourContract?.purpose,
-    [],
-    yourContract?.filters.SetPurpose()
-  );
+  // const [purpose, update] = useContractReader(
+  //   yourContract,
+  //   yourContract?.purpose,
+  //   [],
+  //   yourContract?.filters.SetPurpose()
+  // );
 
   // 📟 Listen for broadcast events
-  const [setPurposeEvents] = useEventListener(yourContract, 'SetPurpose', 0);
+  // const [setPurposeEvents] = useEventListener(yourContract, 'SetPurpose', 0);
 
   // -----------------------------
   // .... 🎇 End of examples
@@ -186,16 +195,15 @@ export const Main: FC = () => {
                 onChange={setAddress}
               />
             </div>
-            <div className="flex flex-wrap">
+            <div className="p-8 pb-40 grid grid-cols-4 gap-4">
               {nfts.map((nft, i) => (
-                <div key={i}>
-                  <img style={{ width: '250px', height: '250px' }} className="w-full" src={nft.image} />
-                  <div>{nft.title}</div>
-                  <div>{nft.description}</div>
+                <div key={i} className="border rounded-t-lg shadow-md">
+                  <img className="w-full rounded-t-lg" src={nft.image} />
+                  <div className="m-2 font-bold text-gray-900 truncate">{nft.title}</div>
+                  <div className="m-2 line-clamp-3">{nft.description}</div>
                 </div>
               ))}
             </div>
-            {/* <MainPageContracts scaffoldAppProviders={scaffoldAppProviders} /> */}
           </Route>
           {/* you can add routes here like the below examlples */}
           <Route path="/hints">
